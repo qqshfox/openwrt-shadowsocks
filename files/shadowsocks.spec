@@ -24,10 +24,28 @@ uci_get_by_type() {
 	echo ${ret:=$3}
 }
 
+append_server() {
+	local server=$1
+	cat <<-EOF >>$CONFIG_FILE
+		        "$server",
+EOF
+}
+
 gen_config_file() {
+	config_load shadowsocks
 	cat <<-EOF >$CONFIG_FILE
 		{
-		    "server": "$(uci_get_by_name $1 server)",
+		    "server": [
+EOF
+	config_get len "$GLOBAL_SERVER" "server_LENGTH"
+	if [ -z "$len" ]; then
+		config_get server "$GLOBAL_SERVER" "server"
+		append_server $server
+	else
+		config_list_foreach "$GLOBAL_SERVER" "server" append_server
+	fi
+	cat <<-EOF >>$CONFIG_FILE
+		    ],
 		    "server_port": $(uci_get_by_name $1 server_port),
 		    "local_address": "0.0.0.0",
 		    "local_port": $(uci_get_by_name $1 local_port),
@@ -38,8 +56,8 @@ gen_config_file() {
 EOF
 }
 
-start_rules() {
-	local server=$(uci_get_by_name $GLOBAL_SERVER server)
+start_rules_server() {
+	local server=$(echo $1 | cut -d: -f1)
 	local local_port=$(uci_get_by_name $GLOBAL_SERVER local_port)
 	if [ "$GLOBAL_SERVER" = "$UDP_RELAY_SERVER" ]; then
 		ARG_UDP="-u"
@@ -64,6 +82,18 @@ start_rules() {
 		local ret=$?
 		[ "$ret" = 0 ] || /usr/bin/ss-rules -f
 	return $ret
+}
+
+start_rules() {
+	config_load shadowsocks
+	config_get len "$GLOBAL_SERVER" "server_LENGTH"
+	if [ -z "$len" ]; then
+		config_get server "$GLOBAL_SERVER" "server"
+		start_rules_server $server
+	else
+		config_list_foreach "$GLOBAL_SERVER" "server" start_rules_server
+	fi
+	return $?
 }
 
 start_redir() {
